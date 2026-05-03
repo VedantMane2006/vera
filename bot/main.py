@@ -136,14 +136,24 @@ async def handle_tick(req: TickPayload):
     results = []
     batch_triggers = req.available_triggers[:20]
     
-    # Process sequentially with small delay to avoid rate limits
+    # Process sequentially with a strict 25-second time budget
+    tick_start = time.time()
     for i, t in enumerate(batch_triggers):
-        if i > 0:
-            await asyncio.sleep(3)
-        res = await process_trigger(t)
-        if res:
-            results.append(res)
-    
+        if time.time() - tick_start > 25.0:
+            print(f"[WARN] Tick time budget exceeded ({time.time() - tick_start:.1f}s). Returning {len(results)} actions early.")
+            break
+            
+        try:
+            remaining_time = max(0.1, 25.0 - (time.time() - tick_start))
+            res = await asyncio.wait_for(process_trigger(t), timeout=remaining_time)
+            if res:
+                results.append(res)
+        except asyncio.TimeoutError:
+            print(f"[WARN] Trigger {t} timed out. Returning {len(results)} actions early.")
+            break
+        except Exception as e:
+            print(f"Error processing trigger {t}: {e}")
+            
     return {"actions": results}
 
 # /v1/reply
